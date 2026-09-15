@@ -27,3 +27,8 @@ Endpoints:
 ## Important limitation
 
 Frinkiac searches subtitle dialogue, not pixels. A title card whose text is never spoken will not be found by searching its visual text. Use dialogue to locate Kent broadcasts, then inspect surrounding frames visually.
+
+## v1.1 fix
+
+- Accepts Frinkiac search results where `Episode` is a string as well as an object.
+- Labels the numeric search control as "Seconds either side". A value of 3 samples from 3 seconds before through 3 seconds after each dialogue hit.
