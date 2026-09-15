@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify, render_template_string
 
 app=Flask(__name__)
 BASE=os.getenv('FRINKIAC_BASE','https://frinkiac.com').rstrip('/')
-UA={'User-Agent':'kent-brockman-zine-research/2.0'}
+UA={'User-Agent':'kent-brockman-zine-research/2.1'}
 EP_COUNTS={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23}
 
 
@@ -79,25 +79,29 @@ def model_score(f,pos,neg):
         return 0.7*p+0.3*((p-n+1)/2)
     return p
 
-HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2</title>
+HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.1</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v2</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<h1>Kent Brockman Frame Finder <small>v2.1</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
 <div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('library')">Training + Zine</button></div>
-<section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max scenes <input name="limit" value="{{limit}}" type="number" min="1" max="50" style="width:60px"></label><button>Search</button></form>
+<section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
-{% for s in scenes %}<section class="scene"><h2>{{s.episode}} · {{s.hit_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
+{% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
 <section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan()">Run visual scan</button></div><div class="tiny">Start with 20+ Good examples. Saved zine frames count as strong positive examples. More varied examples help it find different Channel 6, Smartline and Eye on Springfield layouts.</div><div id="scanMsg" class="status" style="display:none"></div><div id="visualGrid" class="grid"></div></section>
 <section id="library" class="panel"><div class="bar"><button onclick="exportZine()">Export zine CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div id="libraryGrid" class="grid"></div></section>
 <script>
-const K='kent-v2-labels';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
+const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
 function tab(id){document.querySelectorAll('.panel').forEach(x=>x.classList.remove('on'));document.getElementById(id).classList.add('on');refresh()}
 function dataFrom(b){return {episode:b.dataset.ep,timestamp:+b.dataset.ts,timecode:b.dataset.tc,image:b.dataset.img}}
 function labelFrame(b,label){let x=labels(),d=dataFrom(b),id=d.episode+'-'+d.timestamp;if(x[id]&&x[id].label===label)delete x[id];else x[id]={...d,label};saveLabels(x)}
-function refresh(){let x=labels(),a=Object.values(x),g=a.filter(v=>v.label==='good').length,b=a.filter(v=>v.label==='bad').length,z=a.filter(v=>v.label==='zine').length;document.getElementById('trainStatus').textContent=`Training set: ${g} good + ${z} zine positives, ${b} negatives.`;document.getElementById('libraryStatus').textContent=`${g} good examples · ${b} negatives · ${z} saved zine frames`;document.querySelectorAll('.card').forEach(c=>{let v=x[c.dataset.id];c.querySelectorAll('.actions button').forEach(q=>q.classList.remove('good','bad','zine'));if(v){let btn=[...c.querySelectorAll('.actions button')].find(q=>q.textContent.toLowerCase().includes(v.label==='good'?'good':v.label==='bad'?'not':'zine'));if(btn)btn.classList.add(v.label)}});renderLibrary()}
-function cardHTML(v,score=''){return `<div class="card" data-id="${v.episode}-${v.timestamp}"><a href="${v.image}" target="_blank"><img src="${v.image}" loading="lazy"></a><div class="meta"><b>${v.episode}</b> · ${v.timecode||''}${score?`<br><span class="score">Visual score ${score}</span>`:''}</div><div class="actions"><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'good')">Good example</button><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'bad')">Not relevant</button><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'zine')">Save to zine</button></div></div>`}
+function refresh(){let x=labels(),a=Object.values(x),g=a.filter(v=>v.label==='good').length,b=a.filter(v=>v.label==='bad').length,z=a.filter(v=>v.label==='zine').length,n=a.filter(v=>v.label==='news').length;document.getElementById('trainStatus').textContent=`Training set: ${g} good + ${z} zine positives, ${n} news/no-graphic, ${b} negatives.`;document.getElementById('libraryStatus').textContent=`${g} good examples · ${n} news/no-graphic · ${b} negatives · ${z} saved zine frames`;document.querySelectorAll('.card').forEach(c=>{let v=x[c.dataset.id];c.querySelectorAll('.actions button').forEach(q=>q.classList.remove('good','bad','zine'));if(v){let btn=[...c.querySelectorAll('.actions button')].find(q=>q.textContent.toLowerCase().includes(v.label==='good'?'good':v.label==='bad'?'not':v.label==='news'?'news':'zine'));if(btn)btn.classList.add(v.label)}});renderLibrary()}
+function cardHTML(v,score=''){return `<div class="card" data-id="${v.episode}-${v.timestamp}"><a href="${v.image}" target="_blank"><img src="${v.image}" loading="lazy"></a><div class="meta"><b>${v.episode}</b> · ${v.timecode||''}${score?`<br><span class="score">Visual score ${score}</span>`:''}</div><div class="actions"><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'good')">Good example</button><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'news')">News, no graphic</button><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'bad')">Not relevant</button><button data-ep="${v.episode}" data-ts="${v.timestamp}" data-tc="${v.timecode||''}" data-img="${v.image}" onclick="labelFrame(this,'zine')">Save to zine</button></div></div>`}
 function renderLibrary(){let el=document.getElementById('libraryGrid');if(!el)return;el.innerHTML=Object.values(labels()).map(v=>cardHTML(v,`label: ${v.label}`)).join('')}
 async function visualScan(){let x=Object.values(labels()),pos=x.filter(v=>v.label==='good'||v.label==='zine'),neg=x.filter(v=>v.label==='bad');if(pos.length<3){alert('Add at least 3 Good example or Save to zine frames first. 20+ is recommended.');return}let msg=document.getElementById('scanMsg');msg.style.display='block';msg.textContent='Scanning. A full season can take a few minutes on Railway…';document.getElementById('visualGrid').innerHTML='';try{let r=await fetch('/api/visual-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({season:+document.getElementById('season').value,interval:+document.getElementById('interval').value,top_n:+document.getElementById('topn').value,positives:pos,negatives:neg})});let d=await r.json();if(!r.ok)throw new Error(d.error||'Scan failed');msg.textContent=`Scanned ${d.scanned} real frames from Season ${d.season}. Showing ${d.results.length} highest-ranked candidates.`;document.getElementById('visualGrid').innerHTML=d.results.map(v=>cardHTML(v,(v.score*100).toFixed(1)+'%')).join('');refresh()}catch(e){msg.textContent='Visual scan failed: '+e.message}}
 function exportZine(){let a=Object.values(labels()).filter(v=>v.label==='zine'),cols=['episode','timestamp','timecode','image'];let esc=v=>/[",\n]/.test(String(v))?'"'+String(v).replaceAll('"','""')+'"':v;let csv=[cols.join(','),...a.map(v=>cols.map(c=>esc(v[c]||'')).join(','))].join('\n');let u=URL.createObjectURL(new Blob([csv],{type:'text/csv'})),q=document.createElement('a');q.href=u;q.download='kent-brockman-zine.csv';q.click();URL.revokeObjectURL(u)}
+function reviewed(){try{return JSON.parse(localStorage.getItem(R)||'{}')}catch(e){return {}}}
+function markScene(b){let s=b.closest('.scene'),x=reviewed();x[s.dataset.scene]=true;localStorage.setItem(R,JSON.stringify(x));applyReviewed()}
+function applyReviewed(){let h=document.getElementById('hideReviewed')?.checked,x=reviewed();document.querySelectorAll('.scene').forEach(s=>s.style.display=(h&&x[s.dataset.scene])?'none':'')}
+async function expandScene(b,ep,ts){b.disabled=true;b.textContent='Loading…';try{let r=await fetch(`/api/nearby?episode=${ep}&timestamp=${ts}&window=30`),d=await r.json();if(!r.ok)throw new Error(d.error||'Failed');let grid=b.closest('.scene').querySelector('.grid');grid.innerHTML=d.frames.map(v=>cardHTML(v)).join('');refresh()}catch(e){alert(e.message)}finally{b.disabled=false;b.textContent='Expand ±30 sec'}}
 function clearLabels(){if(confirm('Clear training labels and saved zine frames?')){localStorage.removeItem(K);refresh()}}
 refresh();
 </script></body></html>'''
@@ -107,19 +111,49 @@ def index():
     q=request.args.get('q',''); scenes=[]; error=None
     try: window=max(1,min(30,int(request.args.get('window','8'))))
     except: window=8
-    try: limit=max(1,min(50,int(request.args.get('limit','12'))))
-    except: limit=12
+    try: limit=max(1,min(500,int(request.args.get('limit','100'))))
+    except: limit=100
+    scan_all=request.args.get('all')=='1'
     if q:
         try:
-            for h in norm_search(api_json(f'{BASE}/api/search?q={requests.utils.quote(q)}'))[:limit]:
-                ms=window*1000; raw=api_json(f'{BASE}/api/frames/{h["episode"]}/{h["timestamp"]}/{ms}/{ms}')
+            hits=norm_search(api_json(f'{BASE}/api/search?q={requests.utils.quote(q)}'))
+            if not scan_all: hits=hits[:limit]
+            # Merge hits in the same episode when they are within 30 seconds.
+            grouped=[]
+            for h in sorted(hits,key=lambda x:(x['episode'],x['timestamp'])):
+                if grouped and grouped[-1]['episode']==h['episode'] and h['timestamp']-grouped[-1]['last']<=30000:
+                    grouped[-1]['hits'].append(h); grouped[-1]['last']=h['timestamp']
+                else:
+                    grouped.append({'episode':h['episode'],'first':h['timestamp'],'last':h['timestamp'],'hits':[h]})
+            for g in grouped:
+                midpoint=(g['first']+g['last'])//2
+                before=midpoint-(g['first']-window*1000); after=(g['last']+window*1000)-midpoint
+                raw=api_json(f'{BASE}/api/frames/{g["episode"]}/{midpoint}/{max(1000,before)}/{max(1000,after)}')
                 seen=set(); frames=[]
-                for f in norm_frames(raw,h['episode']):
+                for f in norm_frames(raw,g['episode']):
                     k=(f['episode'],f['timestamp'])
                     if k not in seen: seen.add(k); frames.append(f)
-                scenes.append({'episode':h['episode'],'hit_timecode':tc(h['timestamp']),'dialogue':caption(h['episode'],h['timestamp']),'frames':frames})
+                dialogues=[]
+                for h in g['hits']:
+                    c=caption(h['episode'],h['timestamp'])
+                    if c and c not in dialogues: dialogues.append(c)
+                scenes.append({'episode':g['episode'],'scene_id':f'{g["episode"]}-{g["first"]}-{g["last"]}',
+                    'start_timecode':tc(g['first']),'end_timecode':tc(g['last']),'midpoint':midpoint,
+                    'dialogue':' '.join(dialogues),'frames':frames})
         except Exception as e: error=f'Frinkiac request failed: {e}'
-    return render_template_string(HTML,q=q,window=window,limit=limit,scenes=scenes,error=error)
+    return render_template_string(HTML,q=q,window=window,limit=limit,scan_all=scan_all,scenes=scenes,error=error)
+
+@app.route('/api/nearby')
+def nearby():
+    try:
+        ep=request.args['episode']; ts=int(request.args['timestamp']); w=max(1,min(60,int(request.args.get('window','30'))))*1000
+        raw=api_json(f'{BASE}/api/frames/{ep}/{ts}/{w}/{w}')
+        seen=set(); frames=[]
+        for f in norm_frames(raw,ep):
+            k=(f['episode'],f['timestamp'])
+            if k not in seen: seen.add(k); frames.append(f)
+        return jsonify({'frames':frames})
+    except Exception as e:return jsonify({'error':str(e)}),502
 
 @app.route('/api/visual-scan',methods=['POST'])
 def visual_scan():
@@ -153,6 +187,6 @@ def visual_scan():
     except Exception as e:return jsonify({'error':str(e)}),502
 
 @app.route('/health')
-def health(): return {'ok':True,'version':'2.0','methods':['dialogue','visual-training']}
+def health(): return {'ok':True,'version':'2.1','methods':['dialogue','visual-training']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
