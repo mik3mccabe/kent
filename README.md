@@ -1,15 +1,15 @@
-# Kent Brockman Frame Finder v2.3
+# Kent Brockman Frame Finder v2.4
 
-Adds live, visible Visual Scan diagnostics to v2.2.
+Railway-ready Flask app for finding and cataloguing Kent Brockman news graphics from Frinkiac.
 
-## New in v2.3
-- Live Visual Scan Log in the browser
-- Copy Logs and Clear Logs
-- Diagnostic scan of one episode
-- Stop Scan button
-- Episode and frame progress
-- Frinkiac/training-image failure details
-- Full server exception trace returned to the log when a scan fails
-- Existing dialogue search, training labels, Zine Library and ZIP export remain
+## v2.4
 
-Deploy by replacing the files in your GitHub repository. Railway should redeploy automatically. Check `/health` for version 2.3.
+- Visual Scan now runs one episode per HTTP request, avoiding long Railway/browser request cutoffs.
+- Progress is saved in browser localStorage after every completed episode.
+- Resume Scan continues a stopped, refreshed, or interrupted season.
+- Failed episodes do not discard completed work and are retried when you resume.
+- Ranked candidates update after each episode.
+- Diagnostic mode still scans one episode.
+- Dialogue Search, training labels, Zine Library, and ZIP download remain available.
+
+Deploy by replacing the files in the existing GitHub repository. Railway should redeploy automatically. Check `/health` for version 2.4.
