@@ -1,7 +1,7 @@
-import os, io, math, requests, zipfile, re
+import os, io, math, requests, zipfile, re, json, traceback, time
 import numpy as np
 from PIL import Image, ImageFilter
-from flask import Flask, request, jsonify, render_template_string, send_file
+from flask import Flask, request, jsonify, render_template_string, send_file, Response, stream_with_context
 
 app=Flask(__name__)
 BASE=os.getenv('FRINKIAC_BASE','https://frinkiac.com').rstrip('/')
@@ -79,14 +79,14 @@ def model_score(f,pos,neg):
         return 0.7*p+0.3*((p-n+1)/2)
     return p
 
-HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.2</title>
+HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.3</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v2.2</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<h1>Kent Brockman Frame Finder <small>v2.3</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
 <div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('library')">Zine Library</button></div>
 <section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
 {% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
-<section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan()">Run visual scan</button></div><div class="tiny">Start with 20+ Good examples. Saved zine frames count as strong positive examples. More varied examples help it find different Channel 6, Smartline and Eye on Springfield layouts.</div><div id="scanMsg" class="status" style="display:none"></div><div id="visualGrid" class="grid"></div></section>
+<section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan(false)">Run visual scan</button><button onclick="visualScan(true)">Diagnostic: 1 episode</button><button id="stopScan" onclick="stopVisualScan()" disabled>Stop scan</button></div><div class="tiny">Start with 20+ Good examples. Diagnostic mode scans only the first episode and is useful for testing Railway and Frinkiac before a full season.</div><div id="scanMsg" class="status" style="display:none"></div><details open><summary>Visual Scan Log</summary><div class="bar"><button onclick="copyLogs()">Copy logs</button><button onclick="clearLogs()">Clear logs</button></div><pre id="scanLog" style="white-space:pre-wrap;background:#111;color:#eee;padding:12px;max-height:320px;overflow:auto;border-radius:6px">Ready.</pre></details><div id="visualGrid" class="grid"></div></section>
 <section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. Add the exact on-screen wording before downloading your archive.</div><div id="libraryGrid" class="grid"></div></section>
 <script>
 const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
@@ -101,7 +101,12 @@ function editZine(id,k,v){let x=labels();if(x[id]){x[id][k]=v==='Category'?'':v;
 function removeZine(id){let x=labels();delete x[id];saveLabels(x)}
 function downloadOne(url,ep,ts){let a=document.createElement('a');a.href=url;a.download=`${ep}_${ts}.jpg`;a.target='_blank';a.click()}
 async function downloadZip(){let a=Object.values(labels()).filter(v=>v.label==='zine');if(!a.length){alert('Save at least one frame to the zine first.');return}let r=await fetch('/api/zine-zip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:a})});if(!r.ok){let d=await r.json().catch(()=>({}));alert(d.error||'ZIP download failed');return}let blob=await r.blob(),u=URL.createObjectURL(blob),q=document.createElement('a');q.href=u;q.download='kent-brockman-zine.zip';q.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
-async function visualScan(){let x=Object.values(labels()),pos=x.filter(v=>v.label==='good'||v.label==='zine'),neg=x.filter(v=>v.label==='bad');if(pos.length<3){alert('Add at least 3 Good example or Save to zine frames first. 20+ is recommended.');return}let msg=document.getElementById('scanMsg');msg.style.display='block';msg.textContent='Scanning. A full season can take a few minutes on Railway…';document.getElementById('visualGrid').innerHTML='';try{let r=await fetch('/api/visual-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({season:+document.getElementById('season').value,interval:+document.getElementById('interval').value,top_n:+document.getElementById('topn').value,positives:pos,negatives:neg})});let d=await r.json();if(!r.ok)throw new Error(d.error||'Scan failed');msg.textContent=`Scanned ${d.scanned} real frames from Season ${d.season}. Showing ${d.results.length} highest-ranked candidates.`;document.getElementById('visualGrid').innerHTML=d.results.map(v=>cardHTML(v,(v.score*100).toFixed(1)+'%')).join('');refresh()}catch(e){msg.textContent='Visual scan failed: '+e.message}}
+let scanController=null;
+function logLine(text){let el=document.getElementById('scanLog'),stamp=new Date().toLocaleTimeString();if(el.textContent==='Ready.')el.textContent='';el.textContent+=`[${stamp}] ${text}\n`;el.scrollTop=el.scrollHeight}
+function clearLogs(){document.getElementById('scanLog').textContent='Ready.'}
+async function copyLogs(){try{await navigator.clipboard.writeText(document.getElementById('scanLog').textContent);logLine('Logs copied to clipboard.')}catch(e){alert('Could not copy logs: '+e.message)}}
+function stopVisualScan(){if(scanController){scanController.abort();scanController=null;logLine('Stop requested by user.');document.getElementById('stopScan').disabled=true}}
+async function visualScan(diagnostic=false){let x=Object.values(labels()),pos=x.filter(v=>v.label==='good'||v.label==='zine'),neg=x.filter(v=>v.label==='bad');if(pos.length<3){alert('Add at least 3 Good example or Save to zine frames first. 20+ is recommended.');return}let msg=document.getElementById('scanMsg');msg.style.display='block';msg.textContent=diagnostic?'Running one-episode diagnostic…':'Scanning season…';document.getElementById('visualGrid').innerHTML='';clearLogs();logLine(`Starting ${diagnostic?'diagnostic':'full'} scan. ${pos.length} positives, ${neg.length} negatives.`);scanController=new AbortController();document.getElementById('stopScan').disabled=false;try{let r=await fetch('/api/visual-scan-stream',{method:'POST',headers:{'Content-Type':'application/json'},signal:scanController.signal,body:JSON.stringify({season:+document.getElementById('season').value,interval:+document.getElementById('interval').value,top_n:+document.getElementById('topn').value,positives:pos,negatives:neg,diagnostic})});if(!r.ok)throw new Error(`HTTP ${r.status} ${await r.text()}`);let reader=r.body.getReader(),decoder=new TextDecoder(),buf='',finalData=null;while(true){let {value,done}=await reader.read();if(done)break;buf+=decoder.decode(value,{stream:true});let lines=buf.split('\n');buf=lines.pop();for(let line of lines){if(!line.trim())continue;let ev=JSON.parse(line);if(ev.type==='log')logLine(ev.message);else if(ev.type==='error'){logLine('ERROR: '+ev.message);if(ev.trace)logLine(ev.trace);throw new Error(ev.message)}else if(ev.type==='done')finalData=ev.data}}if(!finalData)throw new Error('Scan ended without a result. See log above.');msg.textContent=`Scanned ${finalData.scanned} real frames from Season ${finalData.season}. Showing ${finalData.results.length} highest-ranked candidates.`;document.getElementById('visualGrid').innerHTML=finalData.results.map(v=>cardHTML(v,(v.score*100).toFixed(1)+'%')).join('');logLine('Scan completed successfully.');refresh()}catch(e){if(e.name==='AbortError'){msg.textContent='Visual scan stopped.';logLine('Scan stopped.')}else{msg.textContent='Visual scan failed: '+e.message;logLine('FAILED: '+e.message)}}finally{scanController=null;document.getElementById('stopScan').disabled=true}}
 function exportZine(){let a=Object.values(labels()).filter(v=>v.label==='zine'),cols=['episode','timestamp','timecode','title','category','notes','image'];let esc=v=>/[",\n]/.test(String(v))?'"'+String(v).replaceAll('"','""')+'"':v;let csv=[cols.join(','),...a.map(v=>cols.map(c=>esc(v[c]||'')).join(','))].join('\n');let u=URL.createObjectURL(new Blob([csv],{type:'text/csv'})),q=document.createElement('a');q.href=u;q.download='kent-brockman-zine.csv';q.click();URL.revokeObjectURL(u)}
 function reviewed(){try{return JSON.parse(localStorage.getItem(R)||'{}')}catch(e){return {}}}
 function markScene(b){let s=b.closest('.scene'),x=reviewed();x[s.dataset.scene]=true;localStorage.setItem(R,JSON.stringify(x));applyReviewed()}
@@ -160,6 +165,64 @@ def nearby():
         return jsonify({'frames':frames})
     except Exception as e:return jsonify({'error':str(e)}),502
 
+@app.route('/api/visual-scan-stream',methods=['POST'])
+def visual_scan_stream():
+    d=request.get_json(silent=True) or {}
+    def emit(obj): return json.dumps(obj,separators=(',',':'))+'\n'
+    @stream_with_context
+    def generate():
+        try:
+            season=int(d.get('season',1)); interval=max(10,min(60,int(d.get('interval',30)))); top_n=max(10,min(200,int(d.get('top_n',60))))
+            diagnostic=bool(d.get('diagnostic',False))
+            if season not in EP_COUNTS:
+                yield emit({'type':'error','message':'season must be 1-10'}); return
+            positives=d.get('positives',[]); negatives=d.get('negatives',[])
+            if len(positives)<3:
+                yield emit({'type':'error','message':'At least 3 positive examples are required'}); return
+            yield emit({'type':'log','message':f'Visual scan started. Season {season}, interval {interval}s, top {top_n}.'})
+            yield emit({'type':'log','message':f'Loading training images: {len(positives)} positive, {len(negatives)} negative.'})
+            pos=[]
+            for i,x in enumerate(positives[:80],1):
+                try: pos.append(feature_from_url(x['image']))
+                except Exception as e:
+                    yield emit({'type':'log','message':f'Positive image {i} failed: {type(e).__name__}: {e}'})
+            neg=[]
+            for i,x in enumerate(negatives[:120],1):
+                try: neg.append(feature_from_url(x['image']))
+                except Exception as e:
+                    yield emit({'type':'log','message':f'Negative image {i} failed: {type(e).__name__}: {e}'})
+            yield emit({'type':'log','message':f'Training images loaded: {len(pos)} positive, {len(neg)} negative.'})
+            if len(pos)<3:
+                yield emit({'type':'error','message':'Fewer than 3 positive training images could be downloaded. Check the image URLs shown in your saved examples.'}); return
+            candidates={}; ep_total=1 if diagnostic else EP_COUNTS[season]
+            for e in range(1,ep_total+1):
+                ep=f'S{season:02d}E{e:02d}'; found=0; failures=0
+                yield emit({'type':'log','message':f'Fetching {ep} ({e}/{ep_total})…'})
+                for sec in range(0,24*60,interval):
+                    ts=sec*1000
+                    try:
+                        raw=api_json(f'{BASE}/api/frames/{ep}/{ts}/1000/1000'); fs=norm_frames(raw,ep)
+                        if fs:
+                            f=min(fs,key=lambda x:abs(x['timestamp']-ts)); candidates[(ep,f['timestamp'])]=f; found+=1
+                    except Exception: failures+=1
+                yield emit({'type':'log','message':f'{ep}: {found} probes returned frames, {failures} probe failures, {len(candidates)} unique candidates total.'})
+            yield emit({'type':'log','message':f'Analysing {len(candidates)} candidate images in small batches…'})
+            scored=[]; failures=0
+            vals=list(candidates.values())
+            for i,f in enumerate(vals,1):
+                try:
+                    feat=feature_from_url(f['image']); score=model_score(feat,pos,neg); scored.append({**f,'score':round(score,6)})
+                except Exception as e:
+                    failures+=1
+                    if failures<=10: yield emit({'type':'log','message':f'Image analysis failed for {f["episode"]} {f["timecode"]}: {type(e).__name__}: {e}'})
+                if i%25==0 or i==len(vals): yield emit({'type':'log','message':f'Analysed {i}/{len(vals)} candidates. Successful {len(scored)}, failed {failures}.'})
+            scored.sort(key=lambda x:x['score'],reverse=True)
+            data={'season':season,'scanned':len(scored),'results':scored[:top_n]}
+            yield emit({'type':'done','data':data})
+        except Exception as e:
+            yield emit({'type':'error','message':f'{type(e).__name__}: {e}','trace':traceback.format_exc(limit=8)})
+    return Response(generate(),mimetype='application/x-ndjson',headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no'})
+
 @app.route('/api/visual-scan',methods=['POST'])
 def visual_scan():
     d=request.get_json(silent=True) or {}
@@ -213,6 +276,6 @@ def zine_zip():
     except Exception as e:return jsonify({'error':str(e)}),502
 
 @app.route('/health')
-def health(): return {'ok':True,'version':'2.2','methods':['dialogue','visual-training','zine-library','zip-download']}
+def health(): return {'ok':True,'version':'2.3','methods':['dialogue','visual-training','zine-library','zip-download']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
