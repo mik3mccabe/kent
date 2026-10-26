@@ -79,15 +79,15 @@ def model_score(f,pos,neg):
         return 0.7*p+0.3*((p-n+1)/2)
     return p
 
-HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.5</title>
+HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.7</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v2.6</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<h1>Kent Brockman Frame Finder <small>v2.7</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
 <div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('script')">Script Scan</button><button onclick="tab('library')">Zine Library</button></div>
 <section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
 {% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
 <section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan(false,false)">Start new scan</button><button onclick="resumeVisualScan()">Resume scan</button><button onclick="visualScan(true,false)">Diagnostic: 1 episode</button><button id="stopScan" onclick="stopVisualScan()" disabled>Stop scan</button><button onclick="clearScanProgress()">Clear scan progress</button></div><div class="tiny">Start with 20+ Good examples. Each episode is now a separate short request. Progress and ranked candidates are saved in this browser after every episode. Resume continues after a stop, timeout, refresh, or failed episode.</div><div id="scanMsg" class="status" style="display:none"></div><details open><summary>Visual Scan Log</summary><div class="bar"><button onclick="copyLogs()">Copy logs</button><button onclick="clearLogs()">Clear logs</button></div><pre id="scanLog" style="white-space:pre-wrap;background:#111;color:#eee;padding:12px;max-height:320px;overflow:auto;border-radius:6px">Ready.</pre></details><div id="visualGrid" class="grid"></div></section>
-<section id="script" class="panel"><h2>Script Scan</h2><p>Find likely Kent scenes from episode scripts, then match their dialogue to Frinkiac and inspect frames. One episode per request, with saved progress.</p><div class="bar"><label>Season <select id="scriptSeason">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><button onclick="runScriptScan(false)">Scan season</button><button onclick="runScriptScan(true)">Test one episode</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear progress</button></div><div id="scriptStatus" class="status">Ready.</div><div id="scriptResults"></div></section>
+<section id="script" class="panel"><h2>Script Scan</h2><p>Find dialogue explicitly attributed to Kent in episode scripts, then match it to Frinkiac. If a transcript does not label speakers, it will be reported as unverified rather than guessing. One episode per request, with saved progress.</p><div class="bar"><label>Season <select id="scriptSeason">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><button onclick="runScriptScan(false)">Scan season</button><button onclick="runScriptScan(true)">Test one episode</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear progress</button></div><div id="scriptStatus" class="status">Ready.</div><div id="scriptResults"></div></section>
 <section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. Add the exact on-screen wording before downloading your archive.</div><div id="libraryGrid" class="grid"></div></section>
 <script>
 const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
@@ -363,16 +363,30 @@ def script_episode():
         if node is None: return jsonify(error='Transcript container missing',source=url),502
         raw=node.get_text('\n',strip=True)
         lines=[re.sub(r'\s+',' ',x).strip() for x in raw.splitlines() if x.strip()]
-        # Prefer explicit attribution; fallback to Brockman-related lines as candidate leads.
-        candidates=[]
+        # STRICT speaker attribution: only a Kent-labelled turn qualifies.
+        # An unlabelled subtitle containing "Kent Brockman" is NOT his dialogue.
+        speaker=re.compile(r'^(?:KENT(?: BROCKMAN)?|BROCKMAN)\s*:\s*(.*)$',re.I)
+        any_speaker=re.compile(r'^[A-Z][A-Z .\'-]{1,40}\s*:\s*')
+        candidates=[]; labelled_turns=0
         for i,line in enumerate(lines):
-            if re.search(r'(?i)\b(kent brockman|brockman|kent:|news anchor|eye on springfield|smartline)\b',line):
-                following=' '.join(lines[i+1:i+4])
-                phrase=(following if re.fullmatch(r'(?i)(kent|kent brockman|brockman)\s*:',line) else line)
-                phrase=re.sub(r'(?i)^(kent brockman|brockman|kent)\s*:\s*','',phrase).strip()
-                if len(phrase)<12:phrase=following
-                if len(phrase)>12:candidates.append((i,phrase[:180]))
-        candidates=candidates[:25]
+            m=speaker.match(line)
+            if not m: continue
+            labelled_turns+=1
+            phrase=m.group(1).strip()
+            if not phrase:
+                following=[]
+                for x in lines[i+1:i+8]:
+                    if any_speaker.match(x):break
+                    following.append(x)
+                phrase=' '.join(following)
+            phrase=re.sub(r'\[[^]]+\]|\([^)]*\)',' ',phrase)
+            phrase=' '.join(phrase.split()).strip()
+            if len(phrase)>=8:candidates.append((i,phrase[:240]))
+        # No guess-based fallback: report absent speaker labels explicitly.
+        if not candidates:
+            return jsonify(episode=ep,matches=[],source=url,attribution='none',
+                note='No explicitly Kent-attributed lines found. This source may not label speakers; NOT evidence Kent is absent.',
+                labelled_turns=labelled_turns)
         matches=[]; seen=set()
         for idx,phrase in candidates:
             # Search a short distinctive segment. Character names themselves often aren't spoken.
@@ -389,13 +403,13 @@ def script_episode():
                 seen.add(bucket)
                 try:frames=norm_frames(api_json(f'{BASE}/api/frames/{ep}/{ts}/8000/8000'),ep)
                 except Exception:frames=[{'episode':ep,'timestamp':ts,'timecode':tc(ts),'image':img_url(ep,ts)}]
-                matches.append({'episode':ep,'timestamp':ts,'timecode':tc(ts),'dialogue':phrase,'source':'script + Frinkiac','frames':frames[:20]})
-            else:matches.append({'episode':ep,'timestamp':None,'timecode':None,'dialogue':phrase,'source':'script only','frames':[]})
-        return jsonify(episode=ep,matches=matches,source=url,note=f'{len(candidates)} script leads')
+                matches.append({'episode':ep,'timestamp':ts,'timecode':tc(ts),'dialogue':phrase,'source':'Kent-attributed script + Frinkiac','frames':frames[:20]})
+            else:matches.append({'episode':ep,'timestamp':None,'timecode':None,'dialogue':phrase,'source':'Kent-attributed script (unmatched)','frames':[]})
+        return jsonify(episode=ep,matches=matches,source=url,note=f'{len(candidates)} explicitly Kent-attributed lines',attribution='explicit',labelled_turns=labelled_turns)
     except Exception as exc:
         return jsonify(error=f'{type(exc).__name__}: {exc}',trace=traceback.format_exc()[-1200:]),500
 
 @app.route('/health')
-def health(): return {'ok':True,'version':'2.6','methods':['dialogue','visual-training','zine-library','zip-download']}
+def health(): return {'ok':True,'version':'2.7','methods':['dialogue','visual-training','zine-library','zip-download']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
