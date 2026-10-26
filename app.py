@@ -1,4 +1,4 @@
-import os, io, math, requests, zipfile, re, json, traceback, time
+import os, io, math, requests, zipfile, re, json, traceback, time, html as htmlmod
 import numpy as np
 from PIL import Image, ImageFilter
 from flask import Flask, request, jsonify, render_template_string, send_file, Response, stream_with_context
@@ -79,14 +79,15 @@ def model_score(f,pos,neg):
         return 0.7*p+0.3*((p-n+1)/2)
     return p
 
-HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.4</title>
+HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.5</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v2.4</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
-<div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('library')">Zine Library</button></div>
+<h1>Kent Brockman Frame Finder <small>v2.6</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('script')">Script Scan</button><button onclick="tab('library')">Zine Library</button></div>
 <section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
 {% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
 <section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan(false,false)">Start new scan</button><button onclick="resumeVisualScan()">Resume scan</button><button onclick="visualScan(true,false)">Diagnostic: 1 episode</button><button id="stopScan" onclick="stopVisualScan()" disabled>Stop scan</button><button onclick="clearScanProgress()">Clear scan progress</button></div><div class="tiny">Start with 20+ Good examples. Each episode is now a separate short request. Progress and ranked candidates are saved in this browser after every episode. Resume continues after a stop, timeout, refresh, or failed episode.</div><div id="scanMsg" class="status" style="display:none"></div><details open><summary>Visual Scan Log</summary><div class="bar"><button onclick="copyLogs()">Copy logs</button><button onclick="clearLogs()">Clear logs</button></div><pre id="scanLog" style="white-space:pre-wrap;background:#111;color:#eee;padding:12px;max-height:320px;overflow:auto;border-radius:6px">Ready.</pre></details><div id="visualGrid" class="grid"></div></section>
+<section id="script" class="panel"><h2>Script Scan</h2><p>Find likely Kent scenes from episode scripts, then match their dialogue to Frinkiac and inspect frames. One episode per request, with saved progress.</p><div class="bar"><label>Season <select id="scriptSeason">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><button onclick="runScriptScan(false)">Scan season</button><button onclick="runScriptScan(true)">Test one episode</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear progress</button></div><div id="scriptStatus" class="status">Ready.</div><div id="scriptResults"></div></section>
 <section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. Add the exact on-screen wording before downloading your archive.</div><div id="libraryGrid" class="grid"></div></section>
 <script>
 const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
@@ -113,12 +114,19 @@ function renderRanked(){if(!seasonScan)return;let top=+document.getElementById('
 async function scanOneEpisode(ep,interval,pos,neg){scanController=new AbortController();let r=await fetch('/api/visual-episode',{method:'POST',headers:{'Content-Type':'application/json'},signal:scanController.signal,body:JSON.stringify({episode:ep,interval,positives:pos,negatives:neg})});let text=await r.text();if(!r.ok)throw new Error(`HTTP ${r.status}: ${text}`);let d=JSON.parse(text);if(d.logs)for(let x of d.logs)logLine(x);return d}
 async function visualScan(diagnostic=false,resume=false){let x=Object.values(labels()),pos=x.filter(v=>v.label==='good'||v.label==='zine'),neg=x.filter(v=>v.label==='bad');if(pos.length<3){alert('Add at least 3 Good example or Save to zine frames first. 20+ is recommended.');return}let season=+document.getElementById('season').value,interval=+document.getElementById('interval').value,total={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23}[season],msg=document.getElementById('scanMsg');msg.style.display='block';clearLogs();if(resume){try{seasonScan=JSON.parse(localStorage.getItem(SCANKEY)||'null')}catch(e){seasonScan=null}if(!seasonScan||seasonScan.season!==season||seasonScan.interval!==interval){alert('No matching saved scan to resume for this season and interval.');return}seasonScan.stopped=false;logLine(`Resuming Season ${season} after ${seasonScan.completed.length}/${total} episodes.`)}else{seasonScan={season,interval,completed:[],failed:[],results:{},stopped:false,started:new Date().toISOString()};saveScanProgress();document.getElementById('visualGrid').innerHTML='';logLine(`Starting ${diagnostic?'diagnostic':'resumable'} scan. ${pos.length} positives, ${neg.length} negatives.`)}document.getElementById('stopScan').disabled=false;let eps=diagnostic?[1]:Array.from({length:total},(_,i)=>i+1);try{for(let n of eps){if(seasonScan.stopped)break;let ep=`S${String(season).padStart(2,'0')}E${String(n).padStart(2,'0')}`;if(seasonScan.completed.includes(ep)){logLine(`${ep}: already complete, skipping.`);continue}msg.textContent=`Season ${season}: ${seasonScan.completed.length}/${diagnostic?1:total} episodes complete. Scanning ${ep}…`;logLine(`Requesting ${ep}. Each episode is a separate request.`);try{let d=await scanOneEpisode(ep,interval,pos,neg);for(let v of d.results)seasonScan.results[v.episode+'-'+v.timestamp]=v;seasonScan.completed.push(ep);seasonScan.failed=seasonScan.failed.filter(v=>v!==ep);saveScanProgress();logLine(`${ep}: complete. ${d.scanned} frames scored. ${Object.keys(seasonScan.results).length} season candidates saved.`);renderRanked()}catch(e){if(e.name==='AbortError'){seasonScan.stopped=true;saveScanProgress();logLine(`${ep}: stopped. Completed episodes are preserved.`);break}seasonScan.failed.push(ep);saveScanProgress();logLine(`${ep}: FAILED: ${e.message}`);logLine('Continuing to the next episode. Use Resume scan later to retry failures.')}}msg.textContent=seasonScan.stopped?`Stopped. ${seasonScan.completed.length}/${diagnostic?1:total} episodes saved. Click Resume scan to continue.`:`Finished. ${seasonScan.completed.length}/${diagnostic?1:total} episodes complete, ${seasonScan.failed.length} failed. Showing ranked candidates.`;if(!seasonScan.stopped)logLine(`Season pass finished. Completed ${seasonScan.completed.length}, failed ${seasonScan.failed.length}.`)}finally{scanController=null;document.getElementById('stopScan').disabled=true;renderRanked()}}
 function resumeVisualScan(){visualScan(false,true)}
-function exportZine(){let a=Object.values(labels()).filter(v=>v.label==='zine'),cols=['episode','timestamp','timecode','title','category','notes','image'];let esc=v=>/[",\n]/.test(String(v))?'"'+String(v).replaceAll('"','""')+'"':v;let csv=[cols.join(','),...a.map(v=>cols.map(c=>esc(v[c]||'')).join(','))].join('\n');let u=URL.createObjectURL(new Blob([csv],{type:'text/csv'})),q=document.createElement('a');q.href=u;q.download='kent-brockman-zine.csv';q.click();URL.revokeObjectURL(u)}
+async function exportZine(){let a=Object.values(labels()).filter(v=>v.label==='zine').sort((x,y)=>x.episode.localeCompare(y.episode)||x.timestamp-y.timestamp);if(!a.length){alert('Save at least one frame first.');return}let r=await fetch('/api/subtitles-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:a.map(v=>({episode:v.episode,timestamp:v.timestamp}))})});if(!r.ok){alert('Could not fetch subtitles. Please try again.');return}let d=await r.json();let cols=['episode','timestamp','timecode','title','category','notes','subtitle_text','image'];let esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';let csv=[cols.join(','),...a.map(v=>cols.map(c=>esc(c==='subtitle_text'?(d.subtitles[v.episode+'-'+v.timestamp]||''):v[c])).join(','))].join('\r\n');let u=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'})),q=document.createElement('a');q.href=u;q.download='kent-brockman-zine.csv';q.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
 function reviewed(){try{return JSON.parse(localStorage.getItem(R)||'{}')}catch(e){return {}}}
 function markScene(b){let s=b.closest('.scene'),x=reviewed();x[s.dataset.scene]=true;localStorage.setItem(R,JSON.stringify(x));applyReviewed()}
 function applyReviewed(){let h=document.getElementById('hideReviewed')?.checked,x=reviewed();document.querySelectorAll('.scene').forEach(s=>s.style.display=(h&&x[s.dataset.scene])?'none':'')}
 async function expandScene(b,ep,ts){b.disabled=true;b.textContent='Loading…';try{let r=await fetch(`/api/nearby?episode=${ep}&timestamp=${ts}&window=30`),d=await r.json();if(!r.ok)throw new Error(d.error||'Failed');let grid=b.closest('.scene').querySelector('.grid');grid.innerHTML=d.frames.map(v=>cardHTML(v)).join('');refresh()}catch(e){alert(e.message)}finally{b.disabled=false;b.textContent='Expand ±30 sec'}}
 function clearLabels(){if(confirm('Clear training labels and saved zine frames?')){localStorage.removeItem(K);refresh()}}
+const SCRIPTKEY='kent-v25-script';let scriptStop=false;
+function scriptData(){try{return JSON.parse(localStorage.getItem(SCRIPTKEY)||'null')}catch(e){return null}}
+function clearScriptScan(){localStorage.removeItem(SCRIPTKEY);document.getElementById('scriptResults').innerHTML='';document.getElementById('scriptStatus').textContent='Cleared.'}
+function stopScriptScan(){scriptStop=true;document.getElementById('scriptStatus').textContent='Stopping after current episode. Progress saved.'}
+function showScriptResults(){let d=scriptData(),el=document.getElementById('scriptResults');if(!d)return;el.innerHTML=d.matches.map(m=>`<div class="scene"><h3>${escHtml(m.episode)} · ${escHtml(m.timecode||'Unmatched')} <small>${escHtml(m.source||'')}</small></h3><p>${escHtml(m.dialogue)}</p>${m.frames&&m.frames.length?`<div class="grid">${m.frames.map(f=>cardHTML(f)).join('')}</div>`:'<div class="tiny">No matching Frinkiac frame. Review this episode manually.</div>'}</div>`).join('');refresh()}
+async function runScriptScan(one){let season=+document.getElementById('scriptSeason').value,counts={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23},d=scriptData();if(!d||d.season!==season)d={season,completed:[],matches:[],errors:[]};scriptStop=false;let status=document.getElementById('scriptStatus');for(let n=1;n<=(one?1:counts[season]);n++){if(scriptStop)break;let ep=`S${String(season).padStart(2,'0')}E${String(n).padStart(2,'0')}`;if(d.completed.includes(ep))continue;status.textContent=`Scanning ${ep}, ${d.completed.length} episodes completed`;try{let r=await fetch('/api/script-episode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode:ep})});let x=await r.json();if(!r.ok)throw Error(x.error||`HTTP ${r.status}`);d.matches.push(...x.matches);d.completed.push(ep);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));showScriptResults();status.textContent=`${ep}: ${x.matches.length} candidates, ${d.completed.length} episodes completed. ${x.note||''}`}catch(e){d.errors.push(ep+': '+e.message);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));status.textContent=`${ep}: ${e.message}. Progress saved. Continuing.`}}if(!scriptStop)status.textContent=`Finished pass: ${d.completed.length} episodes, ${d.matches.length} candidate scenes, ${d.errors.length} errors.`}
+showScriptResults();
 refresh();
 </script></body></html>'''
 
@@ -302,6 +310,21 @@ def visual_scan():
         return jsonify({'season':season,'scanned':len(scored),'results':scored[:top_n]})
     except Exception as e:return jsonify({'error':str(e)}),502
 
+@app.route('/api/subtitles-batch',methods=['POST'])
+def subtitles_batch():
+    d=request.get_json(silent=True) or {}
+    items=d.get('items',[])
+    if not isinstance(items,list) or len(items)>300:
+        return jsonify({'error':'Expected at most 300 frames'}),400
+    out={}
+    for item in items:
+        try:
+            ep=str(item.get('episode','')); ts=int(item.get('timestamp',0))
+            if not re.fullmatch(r'S\d{2}E\d{2}',ep) or ts<0: continue
+            out[f'{ep}-{ts}']=caption(ep,ts)
+        except (TypeError,ValueError,AttributeError): continue
+    return jsonify({'subtitles':out})
+
 @app.route('/api/zine-zip',methods=['POST'])
 def zine_zip():
     d=request.get_json(silent=True) or {}; items=d.get('items',[])
@@ -316,14 +339,63 @@ def zine_zip():
                 title=re.sub(r'[^A-Za-z0-9._-]+','-',str(x.get('title','')).strip()).strip('-')[:70]
                 name=f'{ep}/{tc(ts).replace(":","-").replace(".","-")}' + (f'_{title}' if title else '') + '.jpg'
                 z.writestr(name,get(url,timeout=25).content)
-                index.append({k:x.get(k,'') for k in ('episode','timestamp','timecode','title','category','notes','image')})
+                index.append({**{k:x.get(k,'') for k in ('episode','timestamp','timecode','title','category','notes','image')}, 'subtitle_text':caption(ep,ts)})
             import csv
-            sio=io.StringIO(); w=csv.DictWriter(sio,fieldnames=['episode','timestamp','timecode','title','category','notes','image']); w.writeheader(); w.writerows(index)
+            sio=io.StringIO(); w=csv.DictWriter(sio,fieldnames=['episode','timestamp','timecode','title','category','notes','subtitle_text','image']); w.writeheader(); w.writerows(index)
             z.writestr('index.csv',sio.getvalue())
         out.seek(0); return send_file(out,mimetype='application/zip',as_attachment=True,download_name='kent-brockman-zine.zip')
     except Exception as e:return jsonify({'error':str(e)}),502
 
+
+@app.route('/api/script-episode',methods=['POST'])
+def script_episode():
+    try:
+        ep=str((request.get_json(silent=True) or {}).get('episode',''))
+        match=re.fullmatch(r'S(0[1-9]|10)E(0[1-9]|[12][0-9])',ep)
+        if not match:return jsonify(error='Invalid episode ID'),400
+        season,num=int(match[1]),int(match[2])
+        if num>EP_COUNTS[season]:return jsonify(error='Episode out of range'),400
+        # Script pages from SpringfieldSpringfield have character-prefixed lines in some episodes.
+        url=f'https://www.springfieldspringfield.co.uk/view_episode_scripts.php?episode=s{season:02d}e{num:02d}&tv-show=the-simpsons'
+        from bs4 import BeautifulSoup
+        soup=BeautifulSoup(get(url,timeout=18).text,'html.parser')
+        node=soup.select_one('.scrolling-script-container') or soup.select_one('.episode_script') or soup.select_one('.main-content')
+        if node is None: return jsonify(error='Transcript container missing',source=url),502
+        raw=node.get_text('\n',strip=True)
+        lines=[re.sub(r'\s+',' ',x).strip() for x in raw.splitlines() if x.strip()]
+        # Prefer explicit attribution; fallback to Brockman-related lines as candidate leads.
+        candidates=[]
+        for i,line in enumerate(lines):
+            if re.search(r'(?i)\b(kent brockman|brockman|kent:|news anchor|eye on springfield|smartline)\b',line):
+                following=' '.join(lines[i+1:i+4])
+                phrase=(following if re.fullmatch(r'(?i)(kent|kent brockman|brockman)\s*:',line) else line)
+                phrase=re.sub(r'(?i)^(kent brockman|brockman|kent)\s*:\s*','',phrase).strip()
+                if len(phrase)<12:phrase=following
+                if len(phrase)>12:candidates.append((i,phrase[:180]))
+        candidates=candidates[:25]
+        matches=[]; seen=set()
+        for idx,phrase in candidates:
+            # Search a short distinctive segment. Character names themselves often aren't spoken.
+            terms=re.sub(r'\[[^]]+\]|\([^)]*\)',' ',phrase)
+            terms=' '.join(terms.split()[:10])
+            if len(terms)<12:continue
+            try:
+                hits=norm_search(api_json(f'{BASE}/api/search?q={requests.utils.quote(terms)}'))
+                hits=[h for h in hits if h['episode']==ep]
+            except Exception:hits=[]
+            if hits:
+                h=hits[0];ts=h['timestamp'];bucket=ts//15000
+                if bucket in seen:continue
+                seen.add(bucket)
+                try:frames=norm_frames(api_json(f'{BASE}/api/frames/{ep}/{ts}/8000/8000'),ep)
+                except Exception:frames=[{'episode':ep,'timestamp':ts,'timecode':tc(ts),'image':img_url(ep,ts)}]
+                matches.append({'episode':ep,'timestamp':ts,'timecode':tc(ts),'dialogue':phrase,'source':'script + Frinkiac','frames':frames[:20]})
+            else:matches.append({'episode':ep,'timestamp':None,'timecode':None,'dialogue':phrase,'source':'script only','frames':[]})
+        return jsonify(episode=ep,matches=matches,source=url,note=f'{len(candidates)} script leads')
+    except Exception as exc:
+        return jsonify(error=f'{type(exc).__name__}: {exc}',trace=traceback.format_exc()[-1200:]),500
+
 @app.route('/health')
-def health(): return {'ok':True,'version':'2.4','methods':['dialogue','visual-training','zine-library','zip-download']}
+def health(): return {'ok':True,'version':'2.6','methods':['dialogue','visual-training','zine-library','zip-download']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
