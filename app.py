@@ -1,11 +1,12 @@
 import os, io, math, requests, zipfile, re, json, traceback, time, html as htmlmod, csv, threading
+from difflib import SequenceMatcher
 import numpy as np
 from PIL import Image, ImageFilter
 from flask import Flask, request, jsonify, render_template_string, send_file, Response, stream_with_context
 
 app=Flask(__name__)
 BASE=os.getenv('FRINKIAC_BASE','https://frinkiac.com').rstrip('/')
-UA={'User-Agent':'kent-brockman-zine-research/2.8'}
+UA={'User-Agent':'kent-brockman-zine-research/3.0'}
 EP_COUNTS={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23}
 
 
@@ -79,15 +80,15 @@ def model_score(f,pos,neg):
         return 0.7*p+0.3*((p-n+1)/2)
     return p
 
-HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v2.9</title>
+HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v3.0</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v2.9</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<h1>Kent Brockman Frame Finder <small>v3.0</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
 <div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('script')">Script Scan</button><button onclick="tab('library')">Zine Library</button></div>
 <section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
 {% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="tiny"><a href="https://frinkiac.com/caption/{{x.episode}}/{{x.timestamp}}" target="_blank" rel="noopener noreferrer">View on Frinkiac</a></div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div></div>{% endfor %}</div></section>{% endfor %}</section>
 <section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan(false,false)">Start new scan</button><button onclick="resumeVisualScan()">Resume scan</button><button onclick="visualScan(true,false)">Diagnostic: 1 episode</button><button id="stopScan" onclick="stopVisualScan()" disabled>Stop scan</button><button onclick="clearScanProgress()">Clear scan progress</button></div><div class="tiny">Start with 20+ Good examples. Each episode is now a separate short request. Progress and ranked candidates are saved in this browser after every episode. Resume continues after a stop, timeout, refresh, or failed episode.</div><div id="scanMsg" class="status" style="display:none"></div><details open><summary>Visual Scan Log</summary><div class="bar"><button onclick="copyLogs()">Copy logs</button><button onclick="clearLogs()">Clear logs</button></div><pre id="scanLog" style="white-space:pre-wrap;background:#111;color:#eee;padding:12px;max-height:320px;overflow:auto;border-radius:6px">Ready.</pre></details><div id="visualGrid" class="grid"></div></section>
-<section id="script" class="panel"><h2>Script Scan — speaker-attributed</h2><p>Uses a speaker-attributed Simpsons dialogue dataset (Kent Brockman, character ID 211), then matches dialogue to Frinkiac frames. One episode per request, with saved progress. The first scan downloads the dataset to the server and may take longer.</p><div class="bar"><label>Season <select id="scriptSeason">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><button onclick="runScriptScan(false)">Scan season</button><button onclick="runScriptScan(true)">Test one episode</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear progress</button></div><div id="scriptStatus" class="status">Ready.</div><div id="scriptResults"></div></section>
+<section id="script" class="panel"><h2>Kent dialogue — speaker-attributed</h2><p><strong>Primary result: Kent's actual spoken lines.</strong> The source identifies Kent Brockman by character ID 211. Frinkiac matches are checked separately so slow image searches cannot hide the speaker-attributed lines. Use Match all to Frinkiac after loading dialogue. Approximate dataset times are unverified.</p><div class="bar"><label>Season <select id="scriptSeason" onchange="loadScriptEpisodes()">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Episode with Kent dialogue <select id="scriptEpisode" style="min-width:180px"><option value="">Load episodes first</option></select></label><button onclick="loadScriptEpisodes()">Load Kent episodes</button><button onclick="runScriptScan(true)">Test selected episode</button><button onclick="runScriptScan(false)">Scan season</button><button onclick="verifyAllScriptMatches()">Match all to Frinkiac</button><button onclick="exportKentDialogue()">Export Kent dialogue CSV</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear script results</button></div><div id="scriptStatus" class="status">Select a season and click Load Kent episodes to see how many attributed lines are available.</div><div id="scriptCoverage" class="tiny"></div><div id="scriptResults"></div></section>
 <section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. Add the exact on-screen wording before downloading your archive.</div><div id="libraryGrid" class="grid"></div></section>
 <script>
 const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
@@ -120,14 +121,17 @@ function markScene(b){let s=b.closest('.scene'),x=reviewed();x[s.dataset.scene]=
 function applyReviewed(){let h=document.getElementById('hideReviewed')?.checked,x=reviewed();document.querySelectorAll('.scene').forEach(s=>s.style.display=(h&&x[s.dataset.scene])?'none':'')}
 async function expandScene(b,ep,ts){b.disabled=true;b.textContent='Loading…';try{let r=await fetch(`/api/nearby?episode=${ep}&timestamp=${ts}&window=30`),d=await r.json();if(!r.ok)throw new Error(d.error||'Failed');let grid=b.closest('.scene').querySelector('.grid');grid.innerHTML=d.frames.map(v=>cardHTML(v)).join('');refresh()}catch(e){alert(e.message)}finally{b.disabled=false;b.textContent='Expand ±30 sec'}}
 function clearLabels(){if(confirm('Clear training labels and saved zine frames?')){localStorage.removeItem(K);refresh()}}
-const SCRIPTKEY='kent-v28-script';let scriptStop=false;
+const SCRIPTKEY='kent-v30-script';let scriptStop=false,scriptEpisodeIndex=null;
 function scriptData(){try{return JSON.parse(localStorage.getItem(SCRIPTKEY)||'null')}catch(e){return null}}
-function clearScriptScan(){localStorage.removeItem(SCRIPTKEY);document.getElementById('scriptResults').innerHTML='';document.getElementById('scriptStatus').textContent='Cleared.'}
-function stopScriptScan(){scriptStop=true;document.getElementById('scriptStatus').textContent='Stopping after current episode. Progress saved.'}
-function showScriptResults(){let d=scriptData(),el=document.getElementById('scriptResults');if(!d)return;el.innerHTML=d.matches.map(m=>`<div class="scene"><h3>${escHtml(m.episode)} · ${escHtml(m.timecode||'Unmatched')} <small>${escHtml(m.source||'')}</small></h3><p>${escHtml(m.dialogue)}</p>${m.frames&&m.frames.length?`<div class="grid">${m.frames.map(f=>cardHTML(f)).join('')}</div>`:'<div class="tiny">No matching Frinkiac frame. Review this episode manually.</div>'}</div>`).join('');refresh()}
-async function runScriptScan(one){let season=+document.getElementById('scriptSeason').value,counts={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23},d=scriptData();if(!d||d.season!==season)d={season,completed:[],matches:[],errors:[]};scriptStop=false;let status=document.getElementById('scriptStatus');for(let n=1;n<=(one?1:counts[season]);n++){if(scriptStop)break;let ep=`S${String(season).padStart(2,'0')}E${String(n).padStart(2,'0')}`;if(d.completed.includes(ep))continue;status.textContent=`Scanning ${ep}, ${d.completed.length} episodes completed (first scan may download dataset)`;try{let r=await fetch('/api/script-episode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode:ep})});let x=await r.json();if(!r.ok)throw Error(x.error||`HTTP ${r.status}`);d.matches.push(...x.matches);d.completed.push(ep);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));showScriptResults();status.textContent=`${ep}: ${x.matches.length} candidates, ${d.completed.length} episodes completed. ${x.note||''}`}catch(e){d.errors.push(ep+': '+e.message);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));status.textContent=`${ep}: ${e.message}. Progress saved. Continuing.`}}if(!scriptStop)status.textContent=`Finished pass: ${d.completed.length} episodes, ${d.matches.length} candidate scenes, ${d.errors.length} errors.`}
-showScriptResults();
-refresh();
+function clearScriptScan(){localStorage.removeItem(SCRIPTKEY);document.getElementById('scriptResults').innerHTML='';document.getElementById('scriptStatus').textContent='Script results cleared. Your saved zine frames and training labels are untouched.'}
+function stopScriptScan(){scriptStop=true;document.getElementById('scriptStatus').textContent='Stopping after current episode. Completed episode results are saved.'}
+async function loadScriptEpisodes(){let season=+document.getElementById('scriptSeason').value,status=document.getElementById('scriptStatus'),el=document.getElementById('scriptEpisode');status.textContent='Loading speaker-attributed dataset and finding Kent episodes…';try{let r=await fetch('/api/script-episodes?season='+season),d=await r.json();if(!r.ok)throw Error(d.error||'Dataset unavailable');scriptEpisodeIndex=d;el.innerHTML=d.episodes.map(e=>`<option value="${e.episode}">${e.episode} — ${e.line_count} Kent lines</option>`).join('')||'<option value="">No attributed Kent lines found</option>';document.getElementById('scriptCoverage').textContent=`${d.episodes.length} of ${d.total_episodes} episodes contain ${d.total_lines} attributed Kent lines. Character ID ${d.character_ids.join(', ')}. Source: ${d.source}`;status.textContent=d.episodes.length?`Ready. First available episode: ${d.episodes[0].episode}. Test this episode or scan the season.`:'No Kent-attributed lines in this season of this dataset. The dataset may be incomplete; Visual Scan is still useful.';return d}catch(e){status.textContent='Dataset load failed: '+e.message;el.innerHTML='<option value="">Unavailable</option>';return null}}
+function scriptMatchKey(m){return m.episode+'-'+m.dataset_timestamp}
+function showScriptResults(){let d=scriptData(),el=document.getElementById('scriptResults');if(!d){el.innerHTML='';return}el.innerHTML=d.matches.map(m=>{let time=m.timecode||'No verified Frinkiac match',status=m.match_status==='verified'?'Frinkiac subtitle verified':m.match_status==='pending'?'Frinkiac matching not yet attempted':'No verified subtitle match';let near=Number.isFinite(m.dataset_timestamp)?`<a href="https://frinkiac.com/caption/${encodeURIComponent(m.episode)}/${m.dataset_timestamp}" target="_blank" rel="noopener noreferrer">Inspect dataset time on Frinkiac (approximate)</a>`:'';let verified=m.timestamp!==null?`<a href="https://frinkiac.com/caption/${encodeURIComponent(m.episode)}/${m.timestamp}" target="_blank" rel="noopener noreferrer">Open verified Frinkiac match</a>`:'';let key=scriptMatchKey(m);return `<section class="scene"><h3>${escHtml(m.episode)} · ${escHtml(time)}</h3><p><b>${escHtml(status)}</b> · Kent Brockman (ID 211) · ${m.line_count} spoken lines<br><small>Dataset time: ${escHtml(m.dataset_timecode)}</small></p><p>${near}${verified?' · '+verified:''}</p><button onclick="verifyScriptGroup('${key.replaceAll("'",'')}')">${m.match_status==='verified'?'Recheck':'Find matching Frinkiac frames'}</button>${m.matched_subtitle?`<p class="tiny">Matched Frinkiac subtitle: ${escHtml(m.matched_subtitle)} (score ${m.match_score})</p>`:''}<details open><summary>Read ${m.line_count} Kent-attributed lines</summary><ol>${m.lines.map(l=>`<li><strong>${escHtml(l.timecode)}</strong> ${escHtml(l.dialogue)}</li>`).join('')}</ol></details>${m.frames&&m.frames.length?`<div class="grid">${m.frames.map(f=>cardHTML(f)).join('')}</div>`:'<div class="tiny">No verified screenshots yet. Approximate dataset timestamps may not align perfectly with Frinkiac.</div>'}</section>`}).join('')||'<div class="status">No Kent dialogue saved for this scan. Use Load Kent episodes to check dataset coverage.</div>';refresh()}
+async function verifyScriptGroup(key){let d=scriptData();if(!d)return false;let m=d.matches.find(x=>scriptMatchKey(x)===key);if(!m)return false;let status=document.getElementById('scriptStatus');status.textContent=`Matching Kent's dialogue in ${m.episode} to Frinkiac…`;try{let r=await fetch('/api/script-match',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode:m.episode,line_ids:m.lines.map(x=>x.line_id)})});let x=await r.json();if(!r.ok)throw Error(x.error||`HTTP ${r.status}`);Object.assign(m,x);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));showScriptResults();status.textContent=`${m.episode}: ${m.match_status==='verified'?'Verified Frinkiac subtitle match at '+m.timecode:'No exact Frinkiac subtitle match. Kent’s original dialogue is still shown.'}`;return true}catch(e){status.textContent=`Frinkiac lookup failed: ${e.message}. Kent dialogue is preserved.`;return false}}
+async function verifyAllScriptMatches(){let d=scriptData();if(!d||!d.matches.length){document.getElementById('scriptStatus').textContent='Load Kent dialogue first.';return}scriptStop=false;let remaining=d.matches.filter(m=>m.match_status==='pending');for(let i=0;i<remaining.length;i++){if(scriptStop)break;await verifyScriptGroup(scriptMatchKey(remaining[i]));document.getElementById('scriptStatus').textContent=`Frinkiac matching: ${i+1}/${remaining.length} scenes processed. ${scriptData().matches.filter(m=>m.match_status==='verified').length} verified. All attributed dialogue remains saved.`}if(!scriptStop)document.getElementById('scriptStatus').textContent=`Matching complete. ${scriptData().matches.filter(m=>m.match_status==='verified').length} verified scene groups. Unmatched groups retain their attributed dialogue.`}
+function exportKentDialogue(){let d=scriptData();if(!d||!d.matches.length){alert('Load Kent dialogue first.');return}let columns=['episode','character_id','dataset_timestamp','dataset_timecode','spoken_words','frinkiac_timestamp','match_status','frinkiac_url'];let rows=[];for(let m of d.matches)for(let line of m.lines)rows.push({episode:m.episode,character_id:211,dataset_timestamp:line.timestamp,dataset_timecode:line.timecode,spoken_words:line.dialogue,frinkiac_timestamp:m.timestamp??'',match_status:m.match_status,frinkiac_url:m.timestamp!==null?'https://frinkiac.com/caption/'+m.episode+'/'+m.timestamp:''});let quote=x=>'"'+String(x??'').replaceAll('"','""')+'"';let csv=[columns.join(','),...rows.map(r=>columns.map(k=>quote(r[k])).join(','))].join('\r\n');let blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='kent-brockman-attributed-dialogue.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+async function runScriptScan(one){let season=+document.getElementById('scriptSeason').value,status=document.getElementById('scriptStatus');if(!scriptEpisodeIndex||scriptEpisodeIndex.season!==season){if(!await loadScriptEpisodes())return}let eps=one?[document.getElementById('scriptEpisode').value]:scriptEpisodeIndex.episodes.map(e=>e.episode);eps=eps.filter(Boolean);if(!eps.length){status.textContent='No attributed Kent dialogue episodes found. Nothing to scan.';return}let d=scriptData();if(!d||d.season!==season)d={season,completed:[],matches:[],errors:[]};scriptStop=false;for(let ep of eps){if(scriptStop)break;if(d.completed.includes(ep)&&!one)continue;if(one){d.completed=d.completed.filter(x=>x!==ep);d.matches=d.matches.filter(x=>x.episode!==ep)}status.textContent=`Loading Kent's dialogue from ${ep} (${d.completed.length} episodes saved)…`;try{let r=await fetch('/api/script-episode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({episode:ep})});let x=await r.json();if(!r.ok)throw Error(x.error||`HTTP ${r.status}`);d.matches=d.matches.filter(x=>x.episode!==ep).concat(x.matches);d.completed.push(ep);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));showScriptResults();status.textContent=`${ep}: ${x.labelled_turns} Kent-attributed lines, ${x.matches.length} scene groups, ${x.verified_matches} verified Frinkiac matches. ${d.completed.length}/${eps.length} episodes recorded. Results saved.`}catch(e){d.errors.push(ep+': '+e.message);localStorage.setItem(SCRIPTKEY,JSON.stringify(d));status.textContent=`${ep}: ${e.message}. Previous results saved. Continuing.`}}if(!scriptStop){let total=d.matches.reduce((n,m)=>n+(m.line_count||0),0),verified=d.matches.filter(m=>m.match_status==='verified').length;status.textContent=`Completed ${d.completed.length} Kent-containing episodes: ${total} attributed lines in ${d.matches.length} scene groups; ${verified} verified Frinkiac matches; ${d.errors.length} errors. Results are not limited to successful image matches.`}showScriptResults();refresh()}
 </script></body></html>'''
 
 @app.route('/')
@@ -379,7 +383,7 @@ def load_kent_dataset():
             eps=list(read_csv_bytes(f.read()))
         with open(os.path.join(cache_dir,sources['characters']),'rb') as f:
             chars=list(read_csv_bytes(f.read()))
-        kent_ids={str(c.get('id','')).strip() for c in chars if 'kent brockman' in (c.get('normalized_name') or c.get('name') or '').lower()}
+        kent_ids={str(c.get('id','')).strip() for c in chars if (c.get('normalized_name') or c.get('name') or '').strip().casefold()=='kent brockman'}
         if not kent_ids:raise ValueError('Kent Brockman not found in character table')
         episodes={}
         for e in eps:
@@ -407,20 +411,65 @@ def load_kent_dataset():
         _DATA_INFO={'source':DATA_ROOT,'kent_character_ids':sorted(kent_ids),'episodes_with_kent':len(index),'lines':sum(map(len,index.values())),'coverage':'Seasons 1–10'}
         return index,_DATA_INFO
 
-def find_frinkiac_match(ep,phrase,estimated_ms):
-    # Search several short distinctive phrases. Never substitute a guessed timestamp.
-    words=re.findall(r"[\w']+",phrase)
-    queries=[' '.join(words[:10]),' '.join(words[:6])]
-    if len(words)>10:queries.append(' '.join(words[3:11]))
-    for q in dict.fromkeys(queries):
-        if len(q)<9:continue
-        try:
-            hits=[h for h in norm_search(api_json(f'{BASE}/api/search?q={requests.utils.quote(q)}')) if h['episode']==ep]
-        except Exception:continue
-        if hits:
-            # Dataset time may differ from Frinkiac; choose closest plausible hit.
-            return min(hits,key=lambda h:abs(h['timestamp']-estimated_ms))['timestamp']
+def _words(s):
+    return re.findall(r"[a-z0-9]+(?:'[a-z0-9]+)?",str(s).casefold())
+
+
+def _phrase_score(source, subtitle):
+    """Score only subtitle-supported matches; 0 means do not claim it is Kent."""
+    a=_words(source); b=_words(subtitle)
+    if len(a)<3 or len(b)<3:return 0.0
+    if len(a)>len(b): longer=a; shorter=b
+    else: longer=b; shorter=a
+    ratio=SequenceMatcher(None,' '.join(a),' '.join(b),autojunk=False).ratio()
+    # Compare the transcript with every equal-sized segment of the subtitle.
+    window=max(3,min(len(a),len(b)))
+    best=0.0
+    for x in range(len(longer)-window+1):
+        best=max(best,SequenceMatcher(None,shorter,longer[x:x+window],autojunk=False).ratio())
+    # Guard against short common phrases matching another character.
+    same_four=any(a[i:i+4]==b[j:j+4] for i in range(max(0,len(a)-3)) for j in range(max(0,len(b)-3)))
+    if same_four:return max(best,ratio,0.81)
+    return max(best,ratio)*0.85
+
+
+def _search_phrases(dialogue):
+    words=_words(dialogue)
+    if len(words)<4:return []
+    # Short fragments are more reliable than v2.9's ten-word exact subtitle search.
+    lengths=[5,4] if len(words)>=5 else [4]
+    offsets=[0, max(0,(len(words)-5)//2),max(0,len(words)-5)]
+    out=[]
+    for length in lengths:
+        for start in offsets:
+            q=' '.join(words[start:start+length])
+            if len(q)>=15 and q not in out:out.append(q)
+    return out[:4]
+
+
+def find_frinkiac_match(ep,lines):
+    """Only return a timestamp when Frinkiac subtitles support the actual Kent line."""
+    checked=set(); queries=0; checked_captions=0
+    for line in lines[:4]:
+        speech=line['dialogue']
+        for query in _search_phrases(speech)[:3]:
+            if queries>=9 or checked_captions>=32:break
+            queries+=1
+            try:
+                hits=[h for h in norm_search(api_json(f'{BASE}/api/search?q={requests.utils.quote(query)}')) if h['episode']==ep]
+            except Exception:continue
+            hits.sort(key=lambda h:abs(h['timestamp']-line['dataset_timestamp']))
+            for h in hits[:5]:
+                ts=h['timestamp']
+                if ts in checked:continue
+                checked.add(ts);checked_captions+=1
+                sub=caption(ep,ts)
+                score=_phrase_score(speech,sub)
+                if score>=0.73:
+                    return {'timestamp':ts,'subtitle':sub,'score':round(score,3)}
+        if queries>=9 or checked_captions>=32:break
     return None
+
 
 @app.route('/api/script-dataset-status')
 def script_dataset_status():
@@ -428,6 +477,24 @@ def script_dataset_status():
         index,info=load_kent_dataset()
         return jsonify(ok=True,**info)
     except Exception as e:return jsonify(ok=False,error=str(e),source=DATA_ROOT),503
+
+
+@app.route('/api/script-episodes')
+def script_episodes():
+    try:
+        season=int(request.args.get('season','1'))
+        if season not in EP_COUNTS:return jsonify(error='Season must be 1–10'),400
+        index,info=load_kent_dataset()
+        eps=[]
+        for n in range(1,EP_COUNTS[season]+1):
+            ep=f'S{season:02d}E{n:02d}'
+            rows=index.get(ep,[])
+            if rows:eps.append({'episode':ep,'line_count':len(rows),'first_line':rows[0]['dialogue'][:130]})
+        return jsonify(season=season,episodes=eps,total_episodes=EP_COUNTS[season],
+            total_lines=sum(e['line_count'] for e in eps),
+            character_ids=info['kent_character_ids'],source=DATA_ROOT)
+    except Exception as exc:return jsonify(error=f'{type(exc).__name__}: {exc}'),503
+
 
 @app.route('/api/script-episode',methods=['POST'])
 def script_episode():
@@ -439,7 +506,6 @@ def script_episode():
         if num>EP_COUNTS[season]:return jsonify(error='Episode out of range'),400
         index,info=load_kent_dataset()
         rows=index.get(ep,[])
-        # Group Kent lines into scenes if they occur within 35 seconds of each other.
         groups=[]
         for line in sorted(rows,key=lambda x:x['dataset_timestamp']):
             if groups and line['dataset_timestamp']-groups[-1][-1]['dataset_timestamp']<=35000:
@@ -447,27 +513,48 @@ def script_episode():
             else:groups.append([line])
         matches=[]
         for group in groups:
-            # A handful of attempts per scene, not one HTTP call per dialogue line.
-            ts=None
-            for line in group[:3]:
-                ts=find_frinkiac_match(ep,line['dialogue'],line['dataset_timestamp'])
-                if ts is not None:break
-            phrase=' '.join(x['dialogue'] for x in group)
-            frames=[]
-            if ts is not None:
-                try:frames=norm_frames(api_json(f'{BASE}/api/frames/{ep}/{ts}/15000/15000'),ep)[:25]
-                except Exception:frames=[{'episode':ep,'timestamp':ts,'timecode':tc(ts),'image':img_url(ep,ts)}]
-            matches.append({'episode':ep,'timestamp':ts,'timecode':tc(ts) if ts is not None else None,
-                'dataset_timestamp':group[0]['dataset_timestamp'],
-                'dialogue':phrase,'source':'Kent Brockman (character ID 211) — speaker-attributed dataset',
-                'attribution':'explicit','line_count':len(group),'frames':frames})
+            # No Frinkiac requests here. Always deliver attributed dialogue quickly.
+            matches.append({'episode':ep,'timestamp':None,'timecode':None,
+                'dataset_timestamp':group[0]['dataset_timestamp'],'dataset_timecode':tc(group[0]['dataset_timestamp']),
+                'dialogue':' '.join(line['dialogue'] for line in group),
+                'lines':[{'dialogue':line['dialogue'],'timestamp':line['dataset_timestamp'],
+                         'timecode':tc(line['dataset_timestamp']),'line_id':line['line_id']} for line in group],
+                'source':'Kent Brockman (character ID 211) — speaker-attributed dataset',
+                'match_status':'pending','matched_subtitle':None,'match_score':None,
+                'attribution':'explicit','line_count':len(group),'frames':[]})
         return jsonify(episode=ep,matches=matches,source=DATA_ROOT,
-            note=f'{len(rows)} Kent-attributed lines in {len(groups)} scene groups; {sum(m["timestamp"] is not None for m in matches)} Frinkiac matches',
-            attribution='explicit',labelled_turns=len(rows),dataset=info)
+            note=f'{len(rows)} Kent-attributed lines in {len(groups)} dialogue groups. Frinkiac checking is separate.',
+            verified_matches=0,attribution='explicit',labelled_turns=len(rows),dataset=info)
     except Exception as exc:
         return jsonify(error=f'{type(exc).__name__}: {exc}',trace=traceback.format_exc()[-1200:]),503
 
+
+@app.route('/api/script-match',methods=['POST'])
+def script_match():
+    try:
+        payload=request.get_json(silent=True) or {}
+        ep=str(payload.get('episode',''))
+        ids=payload.get('line_ids',[])
+        if not re.fullmatch(r'S(?:0[1-9]|10)E(?:0[1-9]|[12][0-9])',ep):return jsonify(error='Invalid episode'),400
+        if not isinstance(ids,list) or not 1<=len(ids)<=40:return jsonify(error='Send 1 to 40 line IDs'),400
+        index,_=load_kent_dataset()
+        valid={str(row['line_id']):row for row in index.get(ep,[])}
+        if any(str(i) not in valid for i in ids):return jsonify(error='Lines are not attributed to Kent in this episode'),400
+        group=[valid[str(i)] for i in ids]
+        found=find_frinkiac_match(ep,group)
+        ts=found['timestamp'] if found else None
+        frames=[]
+        if found:
+            try:frames=norm_frames(api_json(f'{BASE}/api/frames/{ep}/{ts}/7000/7000'),ep)[:15]
+            except Exception:frames=[{'episode':ep,'timestamp':ts,'timecode':tc(ts),'image':img_url(ep,ts)}]
+        return jsonify(timestamp=ts,timecode=tc(ts) if ts is not None else None,
+            match_status='verified' if found else 'unverified',
+            matched_subtitle=found['subtitle'] if found else None,
+            match_score=found['score'] if found else None,frames=frames)
+    except Exception as e:return jsonify(error=f'{type(e).__name__}: {e}'),503
+
+
 @app.route('/health')
-def health(): return {'ok':True,'version':'2.9','methods':['dialogue','visual-training','zine-library','zip-download','speaker-attributed-script-scan']}
+def health(): return {'ok':True,'version':'3.0','methods':['dialogue','visual-training','zine-library','zip-download','speaker-attributed-script-scan']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
