@@ -1,17 +1,17 @@
-# Kent Brockman Frame Finder v3.3 — Replace old Script Scan scenes on load
+# Kent Brockman Frame Finder v3.4 — Stay on the results page when saving
 
-## Change
+Builds on v3.3, retaining speaker-attributed Script Scan, Dialogue Search, Visual Scan, manual frame adjustment, CSV/JSON restore and backup, and Zine Library.
 
-- **Test selected episode** starts a fresh results list. Previously loaded scenes are removed rather than being pushed down below the new ones.
-- **Scan season** starts a fresh session and progressively collects only the episodes from that run.
-- **Load Kent episodes** (and changing the season) removes the previous Script Scan scene list after the new episode index successfully loads.
-- A new scan also invalidates any still-running earlier scan to avoid stale episode results reappearing.
-- Does not alter the **Zine Library**, saved frames, positive/negative training examples, or the CSV/JSON recovery features from v3.2.
+## What changed
 
-## Install
+- **Save to zine** now leaves you on the results page and displays **Added to Zine Library** briefly in the bottom-right.
+- **Save adjusted frame to zine** now closes the timestamp editor and displays the same confirmation without opening Zine Library.
+- Saving the same already-saved frame a second time reports **Already saved to Zine Library** rather than accidentally removing it.
+- Editing a frame from inside Zine Library keeps you in Zine Library and reports **Zine frame updated**.
+- The application page title, heading and `/health` now all report version 3.4.
 
-Replace `app.py`, `requirements.txt`, `railway.json`, and `README.md` in your GitHub repository and redeploy Railway. Confirm `/health` reports `3.3`. Reload the app.
+The `kent-v2-labels` localStorage key is unchanged. Existing saved frames, notes and training labels are not intentionally modified by this update.
 
-## Check
+## Deployment
 
-Use Script Scan: load Kent episodes, test one episode, then test a different episode. The first episode's scenes should disappear and only the newly tested episode's dialogue should show. Saved zine frames must remain unchanged.
+Replace `app.py`, `requirements.txt`, `railway.json`, and `README.md` in your GitHub repository and let Railway redeploy. Check `/health` for version `3.4`. If you have saved zine frames, download a full library backup (JSON) before upgrading.
