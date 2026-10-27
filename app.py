@@ -6,7 +6,7 @@ from flask import Flask, request, jsonify, render_template_string, send_file, Re
 
 app=Flask(__name__)
 BASE=os.getenv('FRINKIAC_BASE','https://frinkiac.com').rstrip('/')
-UA={'User-Agent':'kent-brockman-zine-research/3.1'}
+UA={'User-Agent':'kent-brockman-zine-research/3.2'}
 EP_COUNTS={1:13,2:22,3:24,4:22,5:22,6:25,7:25,8:25,9:25,10:23}
 
 
@@ -82,14 +82,14 @@ def model_score(f,pos,neg):
 
 HTML=r'''<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kent Brockman Frame Finder v3.1</title>
 <style>body{font-family:system-ui,sans-serif;max-width:1320px;margin:26px auto;padding:0 18px;color:#111}h1{margin:0}.sub{color:#555}.tabs{display:flex;gap:8px;margin:20px 0}.tabs button,.btn{padding:9px 12px;font:inherit}.panel{display:none}.panel.on{display:block}.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:16px 0}input,select,button{font:inherit;padding:8px}label{display:flex;gap:6px;align-items:center}.scene{border-top:2px solid #111;margin:26px 0;padding-top:14px}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}.card{border:1px solid #ccc;border-radius:8px;padding:8px}.card img{width:100%;display:block;background:#eee;min-height:110px}.meta{font-size:13px;margin-top:6px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.actions button{font-size:12px;padding:7px}.good,.zine{background:#111;color:white}.bad{background:#ddd}.status{padding:10px;background:#f4f4f4;margin:12px 0}.error{background:#fee;padding:10px}.score{font-weight:700}.tiny{font-size:13px;color:#555}.adjust-overlay[hidden]{display:none}.adjust-overlay{position:fixed;z-index:1000;inset:0;background:rgba(0,0,0,.68);display:flex;align-items:center;justify-content:center;padding:12px;overflow-y:auto}.adjust-dialog{position:relative;background:#fff;border-radius:10px;padding:18px;width:min(680px,100%);max-height:95vh;overflow-y:auto;box-shadow:0 10px 35px #1117}.adjust-preview{width:100%;max-height:360px;object-fit:contain;background:#eee;margin-top:8px}.adjust-control-row{display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin:10px 0}.adjust-control-row button{padding:8px 10px}.adjust-control-row input{width:205px;max-width:100%}.adjust-dialog .secondary{font-size:13px;color:#555}.adjust-dialog .close{float:right}.adjust-actions{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.adjust-actions button{padding:10px 15px}.adjust-actions .save{background:#111;color:#fff}.adjust-actions .save:disabled{opacity:.45;cursor:not-allowed}</style></head><body>
-<h1>Kent Brockman Frame Finder <small>v3.1</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
+<h1>Kent Brockman Frame Finder <small>v3.2</small></h1><div class="sub">Dialogue search and trainable visual scan feed the same zine library.</div>
 <div class="tabs"><button onclick="tab('dialogue')">Dialogue Search</button><button onclick="tab('visual')">Visual Scan</button><button onclick="tab('script')">Script Scan</button><button onclick="tab('library')">Zine Library</button></div>
 <section id="dialogue" class="panel on"><form class="bar" method="get"><input type="hidden" name="mode" value="dialogue"><input name="q" value="{{q}}" placeholder="e.g. this is Kent Brockman" size="38"><label>Seconds either side <input name="window" value="{{window}}" type="number" min="1" max="30" style="width:65px"></label><label>Max raw matches <input name="limit" value="{{limit}}" type="number" min="1" max="500" style="width:72px"><label><input type="checkbox" name="all" value="1" {% if scan_all %}checked{% endif %}> Scan all matches</label><label><input type="checkbox" id="hideReviewed" onchange="applyReviewed()"> Hide reviewed scenes</label></label><button>Search</button></form>
 {% if error %}<div class="error">{{error}}</div>{% endif %}
 {% for s in scenes %}<section class="scene" data-scene="{{s.scene_id}}"><h2>{{s.episode}} · {{s.start_timecode}}–{{s.end_timecode}}</h2><div class="tiny">{{s.dialogue}}</div><div class="bar"><button type="button" onclick="markScene(this)">Mark scene reviewed</button><button type="button" onclick="expandScene(this,'{{s.episode}}',{{s.midpoint}})">Expand ±30 sec</button></div><div class="grid">{% for x in s.frames %}<div class="card" data-id="{{x.episode}}-{{x.timestamp}}"><a href="{{x.image}}" target="_blank"><img src="{{x.image}}" loading="lazy"></a><div class="meta"><b>{{x.episode}}</b> · {{x.timecode}}<br>{{x.timestamp}} ms</div><div class="tiny"><a href="https://frinkiac.com/caption/{{x.episode}}/{{x.timestamp}}" target="_blank" rel="noopener noreferrer">View on Frinkiac</a></div><div class="actions"><button onclick="labelFrame(this,'good')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Good example</button><button onclick="labelFrame(this,'news')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">News, no graphic</button><button onclick="labelFrame(this,'bad')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Not relevant</button><button onclick="labelFrame(this,'zine')" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}">Save to zine</button></div><button class="btn" type="button" style="margin-top:7px;width:100%;font-size:12px" data-ep="{{x.episode}}" data-ts="{{x.timestamp}}" data-tc="{{x.timecode}}" data-img="{{x.image}}" onclick="openAdjustFrame(this)">Adjust timestamp / Add to zine</button></div>{% endfor %}</div></section>{% endfor %}</section>
 <section id="visual" class="panel"><div class="status" id="trainStatus"></div><div class="bar"><label>Season <select id="season">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Sample every <select id="interval"><option value="30">30 sec</option><option value="20">20 sec</option><option value="15">15 sec</option><option value="10">10 sec</option></select></label><label>Top results <input id="topn" type="number" value="60" min="10" max="200" style="width:65px"></label><button onclick="visualScan(false,false)">Start new scan</button><button onclick="resumeVisualScan()">Resume scan</button><button onclick="visualScan(true,false)">Diagnostic: 1 episode</button><button id="stopScan" onclick="stopVisualScan()" disabled>Stop scan</button><button onclick="clearScanProgress()">Clear scan progress</button></div><div class="tiny">Start with 20+ Good examples. Each episode is now a separate short request. Progress and ranked candidates are saved in this browser after every episode. Resume continues after a stop, timeout, refresh, or failed episode.</div><div id="scanMsg" class="status" style="display:none"></div><details open><summary>Visual Scan Log</summary><div class="bar"><button onclick="copyLogs()">Copy logs</button><button onclick="clearLogs()">Clear logs</button></div><pre id="scanLog" style="white-space:pre-wrap;background:#111;color:#eee;padding:12px;max-height:320px;overflow:auto;border-radius:6px">Ready.</pre></details><div id="visualGrid" class="grid"></div></section>
 <section id="script" class="panel"><h2>Kent dialogue — speaker-attributed</h2><p><strong>Primary result: Kent's actual spoken lines.</strong> The source identifies Kent Brockman by character ID 211. Frinkiac matches are checked separately so slow image searches cannot hide the speaker-attributed lines. Use Match all to Frinkiac after loading dialogue. Approximate dataset times are unverified.</p><div class="bar"><label>Season <select id="scriptSeason" onchange="loadScriptEpisodes()">{% for n in range(1,11) %}<option value="{{n}}">Season {{n}}</option>{% endfor %}</select></label><label>Episode with Kent dialogue <select id="scriptEpisode" style="min-width:180px"><option value="">Load episodes first</option></select></label><button onclick="loadScriptEpisodes()">Load Kent episodes</button><button onclick="runScriptScan(true)">Test selected episode</button><button onclick="runScriptScan(false)">Scan season</button><button onclick="verifyAllScriptMatches()">Match all to Frinkiac</button><button onclick="exportKentDialogue()">Export Kent dialogue CSV</button><button onclick="stopScriptScan()">Stop</button><button onclick="clearScriptScan()">Clear script results</button></div><div id="scriptStatus" class="status">Select a season and click Load Kent episodes to see how many attributed lines are available.</div><div id="scriptCoverage" class="tiny"></div><div id="scriptResults"></div></section>
-<section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. Add the exact on-screen wording before downloading your archive.</div><div id="libraryGrid" class="grid"></div></section>
+<section id="library" class="panel"><div class="bar"><button onclick="downloadZip()">Download Zine ZIP</button><button onclick="exportZine()">Export metadata CSV</button><button onclick="downloadLabelsBackup()">Download full library backup (JSON)</button><button onclick="document.getElementById('zineCsvRestore').click()">Restore saved frames from CSV</button><input id="zineCsvRestore" type="file" accept=".csv,text/csv" hidden onchange="importZineCsv(this)"><button onclick="document.getElementById('zineJsonRestore').click()">Restore full backup (JSON)</button><input id="zineJsonRestore" type="file" accept=".json,application/json" hidden onchange="importLabelsJson(this)"><button onclick="clearLabels()">Clear all labels</button></div><div id="libraryStatus" class="status"></div><div class="tiny">Saved zine frames appear here in season, episode and timestamp order. To recover saved frames from an older CSV, click <b>Restore saved frames from CSV</b>. Import <b>merges</b> with your current frames, never replaces your library. Download a full backup first.</div><div id="libraryImportStatus" class="status" hidden role="status"></div><div id="libraryGrid" class="grid"></div></section>
 <div id="adjustModal" class="adjust-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="adjustHeading" onclick="if(event.target===this)closeAdjust()"><div class="adjust-dialog"><button class="close" type="button" onclick="closeAdjust()" aria-label="Close adjustment">Close ×</button><h2 id="adjustHeading">Adjust timestamp · Add to zine</h2><p class="secondary" id="adjustOriginal"></p><img class="adjust-preview" id="adjustImage" alt="Current selected Frinkiac frame"><p class="secondary" id="adjustCurrent">Preview the new timestamp before saving.</p><label for="adjustTime" style="display:block;margin-top:8px"><b>Time or Frinkiac page URL</b></label><div class="adjust-control-row"><input id="adjustTime" type="text" placeholder="05:12.000 or Frinkiac URL" oninput="invalidateAdjustPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();previewAdjust()}"><button type="button" onclick="previewAdjust()">Preview frame</button></div><div class="adjust-control-row"><button type="button" onclick="nudgeAdjust(-5000)">−5s</button><button type="button" onclick="nudgeAdjust(-1000)">−1s</button><button type="button" onclick="nudgeAdjust(-100)">−0.1s</button><button type="button" onclick="nudgeAdjust(100)">+0.1s</button><button type="button" onclick="nudgeAdjust(1000)">+1s</button><button type="button" onclick="nudgeAdjust(5000)">+5s</button></div><p class="secondary">Enter mm:ss.mmm, a millisecond timestamp, or paste a Frinkiac caption URL from the same episode. Preview snaps to the nearest available Frinkiac screenshot.</p><p id="adjustStatus" class="status" role="status">Choose a time, then preview the frame.</p><div class="adjust-actions"><a id="adjustFrinkiac" href="#" target="_blank" rel="noopener noreferrer">View on Frinkiac</a><button id="adjustSave" class="save" type="button" onclick="saveAdjustedFrame()" disabled>Save adjusted frame to zine</button></div></div></div>
 <script>
 const K='kent-v2-labels',R='kent-v21-reviewed';function labels(){try{return JSON.parse(localStorage.getItem(K)||'{}')}catch(e){return {}}}function saveLabels(x){localStorage.setItem(K,JSON.stringify(x));refresh()}
@@ -137,7 +137,110 @@ function reviewed(){try{return JSON.parse(localStorage.getItem(R)||'{}')}catch(e
 function markScene(b){let s=b.closest('.scene'),x=reviewed();x[s.dataset.scene]=true;localStorage.setItem(R,JSON.stringify(x));applyReviewed()}
 function applyReviewed(){let h=document.getElementById('hideReviewed')?.checked,x=reviewed();document.querySelectorAll('.scene').forEach(s=>s.style.display=(h&&x[s.dataset.scene])?'none':'')}
 async function expandScene(b,ep,ts){b.disabled=true;b.textContent='Loading…';try{let r=await fetch(`/api/nearby?episode=${ep}&timestamp=${ts}&window=30`),d=await r.json();if(!r.ok)throw new Error(d.error||'Failed');let grid=b.closest('.scene').querySelector('.grid');grid.innerHTML=d.frames.map(v=>cardHTML(v)).join('');refresh()}catch(e){alert(e.message)}finally{b.disabled=false;b.textContent='Expand ±30 sec'}}
-function clearLabels(){if(confirm('Clear training labels and saved zine frames?')){localStorage.removeItem(K);refresh()}}
+// Offline recovery: older CSV exports contain the saved Frinkiac episode, timestamp and image.
+// Merge rather than replace. All saved frames, positives and negatives share the same storage key.
+function triggerLocalDownload(name,text,mime){
+  const blob=new Blob([text],{type:mime}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function downloadLabelsBackup(){
+  const data={format:'kent-labels-backup-v1',exported_at:new Date().toISOString(),labels:labels()};
+  triggerLocalDownload('kent-brockman-library-backup.json',JSON.stringify(data,null,2),'application/json');
+}
+function showImportStatus(msg,isError=false){
+  const el=document.getElementById('libraryImportStatus');el.hidden=false;el.textContent=msg;
+  el.className='status'+(isError?' error':'');
+}
+function csvTable(text){
+  // RFC 4180 quoted CSV, including commas, escaped double quotes, and embedded newlines.
+  const rows=[];let row=[],field='',quoted=false;
+  const src=String(text).replace(/^\uFEFF/,'');
+  for(let i=0;i<src.length;i++){
+    const c=src[i];
+    if(quoted){
+      if(c==='"'&&src[i+1]==='"'){field+='"';i++}
+      else if(c==='"'){quoted=false}
+      else field+=c;
+    }else if(c==='"'&&field===''){quoted=true}
+    else if(c===','){row.push(field);field=''}
+    else if(c==='\n'||c==='\r'){
+      if(c==='\r'&&src[i+1]==='\n')i++;
+      row.push(field);field='';if(row.some(v=>v!==''))rows.push(row);row=[];
+    }else field+=c;
+  }
+  if(quoted)throw Error('CSV ends inside a quoted field.');
+  row.push(field);if(row.some(v=>v!==''))rows.push(row);
+  return rows;
+}
+function importedFrame(record){
+  const episode=String(record.episode||'').trim().toUpperCase();
+  const raw=record.adjusted_timestamp||record.timestamp;
+  const timestamp=Number(raw);
+  if(!/^S\d{2}E\d{2}$/.test(episode)||!/^\d+$/.test(String(raw||''))||!Number.isSafeInteger(timestamp)||timestamp<0||timestamp>3600000) return null;
+  const timecode=String(record.adjusted_timecode||record.timecode||formatAdjustTime(timestamp)).trim();
+  const image=`https://frinkiac.com/img/${episode}/${timestamp}.jpg`;
+  const v={episode,timestamp,timecode,image,label:'zine'};
+  for(const f of ['title','category','notes'])if(record[f])v[f]=String(record[f]);
+  for(const f of ['original_timestamp','requested_timestamp']){
+    if(/^\d+$/.test(String(record[f]||'')))v[f]=Number(record[f]);
+  }
+  for(const f of ['original_timecode','requested_timecode'])if(record[f])v[f]=String(record[f]);
+  return v;
+}
+function mergeImportedFrames(items){
+  const current=labels(),next={...current};let added=0,already=0,invalid=0;
+  for(const incoming of items){
+    if(!incoming){invalid++;continue}
+    const id=incoming.episode+'-'+incoming.timestamp,existing=next[id];
+    if(existing){already++;if(existing.label==='zine'){
+      // Keep newly edited titles, notes and adjusted metadata; fill only old blanks.
+      for(const [k,v] of Object.entries(incoming))if((existing[k]===undefined||existing[k]==='')&&v!==undefined)existing[k]=v;
+    }else{
+      next[id]={...incoming,...existing,label:'zine'};
+    }}else{next[id]=incoming;added++}
+  }
+  if(added===0&&already===0)throw Error('No valid saved frames found in the supplied file.');
+  // Preserve an immediate restore point before changing the browser's live library.
+  const before=localStorage.getItem(K)||'{}';
+  localStorage.setItem('kent-v32-before-restore',before);
+  saveLabels(next);
+  return {added,already,invalid,total:Object.values(next).filter(v=>v.label==='zine').length};
+}
+async function importZineCsv(input){
+  const file=input.files&&input.files[0];if(!file)return;
+  try{
+    const rows=csvTable(await file.text());if(rows.length<2)throw Error('The CSV contains no saved frames.');
+    const header=rows[0].map(s=>s.trim().replace(/^\uFEFF/,'').toLowerCase());
+    if(!header.includes('episode')||!header.includes('timestamp'))throw Error('Expected episode and timestamp columns.');
+    if(rows.length>20001)throw Error('File exceeds the 20,000-frame safety limit.');
+    const frames=rows.slice(1).map(row=>{
+      const r={};header.forEach((name,i)=>r[name]=row[i]||'');return importedFrame(r);
+    });
+    const valid=frames.filter(Boolean).length;
+    if(valid===0)throw Error('No valid episode/timestamp pairs found.');
+    if(!confirm(`Restore ${valid} saved frames from ${file.name}? This MERGES with your current library; existing saved frames are kept.`))return;
+    const result=mergeImportedFrames(frames);
+    showImportStatus(`Restore complete: ${result.added} restored, ${result.already} already present, ${result.invalid} invalid rows skipped. Zine Library now has ${result.total} frames. Download a full library backup (JSON) now.`);
+  }catch(e){showImportStatus('CSV restore failed: '+e.message,true)}
+  finally{input.value=''}
+}
+async function importLabelsJson(input){
+  const file=input.files&&input.files[0];if(!file)return;
+  try{
+    const d=JSON.parse(await file.text()),all=d.labels||d;
+    if(!all||typeof all!=='object'||Array.isArray(all))throw Error('Invalid labels backup.');
+    const entries=Object.values(all).filter(v=>v&&typeof v==='object'&&/^(good|bad|news|zine)$/.test(v.label||'')&&/^S\d{2}E\d{2}$/.test(v.episode||'')&&Number.isSafeInteger(Number(v.timestamp))&&Number(v.timestamp)>=0&&Number(v.timestamp)<=3600000);
+    if(!entries.length)throw Error('Backup contains no valid labels.');
+    if(!confirm(`Merge ${entries.length} labelled frames from this JSON backup? Your current entries will be preserved.`))return;
+    const current=labels(),next={...current};let added=0;
+    for(const v of entries){const key=v.episode+'-'+Number(v.timestamp);if(!next[key]){next[key]={...v,timestamp:Number(v.timestamp)};added++}}
+    localStorage.setItem('kent-v32-before-restore',localStorage.getItem(K)||'{}');saveLabels(next);
+    showImportStatus(`JSON backup merged. ${added} labels added, ${entries.length-added} already present.`);
+  }catch(e){showImportStatus('JSON restore failed: '+e.message,true)}
+  finally{input.value=''}
+}
+
+function clearLabels(){if(confirm('This deletes all browser-stored zine frames AND training examples. Have you downloaded a FULL LIBRARY BACKUP (JSON)?')){localStorage.removeItem(K);refresh()}}
 const SCRIPTKEY='kent-v30-script';let scriptStop=false,scriptEpisodeIndex=null;
 function scriptData(){try{return JSON.parse(localStorage.getItem(SCRIPTKEY)||'null')}catch(e){return null}}
 function clearScriptScan(){localStorage.removeItem(SCRIPTKEY);document.getElementById('scriptResults').innerHTML='';document.getElementById('scriptStatus').textContent='Script results cleared. Your saved zine frames and training labels are untouched.'}
@@ -599,6 +702,6 @@ def script_match():
 
 
 @app.route('/health')
-def health(): return {'ok':True,'version':'3.1','methods':['dialogue','visual-training','zine-library','zip-download','speaker-attributed-script-scan']}
+def health(): return {'ok':True,'version':'3.2','methods':['dialogue','visual-training','zine-library','zip-download','speaker-attributed-script-scan']}
 
 if __name__=='__main__': app.run(host='0.0.0.0',port=int(os.getenv('PORT','5000')))
