@@ -1,28 +1,17 @@
-# Kent Brockman Frame Finder v3.2 — Safe restore of previously saved zine frames
+# Kent Brockman Frame Finder v3.3 — Replace old Script Scan scenes on load
 
-## Restore from the older CSV without losing new saves
+## Change
 
-1. Install the four root files (`app.py`, `requirements.txt`, `railway.json`, `README.md`) and redeploy Railway.
-2. Open **Zine Library** on the same site and browser profile used to save your current frames.
-3. First click **Download full library backup (JSON)** to preserve your current entries and training labels.
-4. Click **Restore saved frames from CSV**, choose the earlier `kent-brockman-zine (1).csv`, and approve the merge.
-5. The CSV importer accepts the old 7-column exports and newer exports with timestamps and subtitles. Existing saved frames and manually edited titles/notes take priority over duplicates; no frames or labels are cleared.
-6. Confirm the counter and download another full library backup (JSON).
+- **Test selected episode** starts a fresh results list. Previously loaded scenes are removed rather than being pushed down below the new ones.
+- **Scan season** starts a fresh session and progressively collects only the episodes from that run.
+- **Load Kent episodes** (and changing the season) removes the previous Script Scan scene list after the new episode index successfully loads.
+- A new scan also invalidates any still-running earlier scan to avoid stale episode results reappearing.
+- Does not alter the **Zine Library**, saved frames, positive/negative training examples, or the CSV/JSON recovery features from v3.2.
 
-The user's supplied backup contains 47 distinct frames. If the current two saved frames are different, the restored library should contain 49 frames.
+## Install
 
-## Changes
+Replace `app.py`, `requirements.txt`, `railway.json`, and `README.md` in your GitHub repository and redeploy Railway. Confirm `/health` reports `3.3`. Reload the app.
 
-- Adds CSV recovery in the Zine Library without needing a network connection or Frinkiac lookup.
-- Adds full browser label/training-data backup to JSON and merge-style JSON restore.
-- Preserves current browser state in the `kent-v32-before-restore` localStorage key before any import.
-- Improves the Clear all labels warning.
-- Does not change underlying persistent storage key (`kent-v2-labels`) or v3.1's timestamp adjustment, Script Scan, Dialogue Search, Visual Scan, or Frinkiac links.
+## Check
 
-## Deployment check
-
-`/health` reports 3.2. Browser page heading displays v3.2.
-
-## Limitations
-
-Existing browser data depends on visiting the same exact origin and profile; this cannot repair cleared localStorage without an exported backup. CSV imports restore zine entries, not positive/negative visual training labels. Full JSON backup restores training labels too.
+Use Script Scan: load Kent episodes, test one episode, then test a different episode. The first episode's scenes should disappear and only the newly tested episode's dialogue should show. Saved zine frames must remain unchanged.
